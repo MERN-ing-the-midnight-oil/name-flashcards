@@ -1,0 +1,21 @@
+{
+  "name": "Name Flashcards",
+  "short_name": "Names",
+  "description": "Learn transportation staff names",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0c325f",
+  "theme_color": "#0c325f",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
