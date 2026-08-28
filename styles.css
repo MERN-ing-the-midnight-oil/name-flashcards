@@ -177,6 +177,9 @@ h1 {
   flex: 1;
   min-height: 0;
   background: #d7e3f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .photo-wrap img,
@@ -184,8 +187,8 @@ h1 {
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
-  object-position: center top;
+  object-fit: contain;
+  object-position: center center;
 }
 
 .photo-wrap.small {
@@ -200,6 +203,7 @@ h1 {
 
 .photo-wrap.small img,
 .photo-wrap.small .initials {
+  object-fit: cover;
   object-position: center 15%;
 }
 
