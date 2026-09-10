@@ -6,9 +6,10 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#0c325f" />
+    <meta name="theme-color" content="#f5f3ed" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Names" />
     <title>Name Flashcards</title>
     <link rel="manifest" href="manifest.json" />
@@ -17,74 +18,66 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app">
-      <header class="top">
-        <div>
-          <p class="eyebrow">Transportation</p>
-          <h1>Name Flashcards</h1>
-        </div>
-        <p class="progress-label" id="progress-label">0 known</p>
+    <div id="app">
+      <header class="header">
+        <h1>Transportation Names</h1>
+        <p>Drag cards between decks</p>
       </header>
-      <div class="progress" aria-hidden="true">
-        <div class="progress-bar" id="progress-bar"></div>
+
+      <div class="controls">
+        <button class="shuffle-btn" id="shuffle-btn" type="button">Shuffle</button>
+        <button class="reset-btn" id="reset-btn" type="button">Reset all</button>
       </div>
 
-      <main id="study-view" class="view">
-        <section class="stage" id="stage">
-          <button class="card" id="card" type="button" aria-label="Flip card">
-            <div class="card-inner" id="card-inner">
-              <div class="face front">
-                <div class="photo-wrap" id="photo-wrap"></div>
-                <p class="hint" id="card-hint">Tap to see the name</p>
-              </div>
-              <div class="face back">
-                <div class="photo-wrap small" id="photo-wrap-back"></div>
-                <p class="revealed-name" id="revealed-name"></p>
-                <p class="revealed-say" id="revealed-say"></p>
-                <p class="revealed-title" id="revealed-title"></p>
-              </div>
-            </div>
-          </button>
+      <div class="decks-container">
+        <section class="deck deck-learning" data-deck="learning">
+          <div class="deck-header">
+            <div class="deck-title">Still Learning</div>
+            <div class="deck-count"><span id="learning-count">0</span> cards</div>
+          </div>
+          <div class="deck-cards" id="learning-deck"></div>
         </section>
 
-        <div class="actions" id="study-actions">
-          <button class="btn warn" id="oops-btn" type="button">I'm not sure</button>
-          <button class="btn primary" id="got-it-btn" type="button">Got it</button>
-        </div>
-        <div class="edit-row">
-          <button class="text-btn" id="edit-btn" type="button">Edit name</button>
-          <button class="text-btn" id="shuffle-btn" type="button">Skip</button>
-        </div>
-      </main>
+        <section class="deck deck-know" data-deck="know">
+          <div class="deck-header">
+            <div class="deck-title">Got It!</div>
+            <div class="deck-count"><span id="know-count">0</span> cards</div>
+          </div>
+          <div class="deck-cards" id="know-deck"></div>
+        </section>
+      </div>
 
-      <main id="names-view" class="view hidden">
-        <label class="search-label">
-          <span class="sr-only">Search names</span>
-          <input id="search" type="search" placeholder="Search names" autocomplete="off" />
-        </label>
-        <p class="list-help">Tap a name to change it to a nickname. Every name stays in the pile.</p>
-        <ul class="roster" id="roster"></ul>
-        <button class="text-btn reset-stats" id="reset-btn" type="button">Reset practice stats</button>
-      </main>
-
-      <nav class="tabbar">
-        <button class="tab is-active" id="tab-study" type="button">Study</button>
-        <button class="tab" id="tab-names" type="button">Names</button>
-      </nav>
+      <button class="install-link" id="install-link" type="button">
+        Add to iPhone
+      </button>
     </div>
 
-    <dialog id="edit-dialog">
-      <form id="edit-form">
-        <h2>What do they go by?</h2>
-        <p id="edit-full-name" class="edit-full"></p>
-        <input id="edit-input" type="text" maxlength="40" autocomplete="off" />
+    <dialog id="install-dialog">
+      <form method="dialog" class="install-sheet">
+        <h2>Put this on your iPhone</h2>
+        <p class="install-lead">
+          The Home Screen shortcut has to be created in <strong>Safari</strong>.
+          A downloaded file is a backup you can AirDrop.
+        </p>
+        <ol>
+          <li>Open this site in Safari (not Chrome).</li>
+          <li>Tap the <strong>Share</strong> button.</li>
+          <li>Scroll and tap <strong>Add to Home Screen</strong>.</li>
+          <li>Tap <strong>Add</strong>.</li>
+        </ol>
+        <p class="install-note">
+          After that, Names opens like any other app and keeps working offline.
+        </p>
         <div class="dialog-actions">
-          <button class="btn ghost" id="cancel-edit-btn" type="button">Cancel</button>
-          <button class="btn primary" value="save" id="save-name-btn" type="submit">
-            Save
+          <button class="reset-btn" id="copy-link-btn" type="button">
+            Copy page link
+          </button>
+          <button class="reset-btn" id="download-btn" type="button">
+            Download HTML
           </button>
         </div>
-        <button class="text-btn" id="restore-btn" type="button">Use directory name</button>
+        <button class="shuffle-btn install-done" value="close" type="submit">Done</button>
+        <p class="copy-status" id="copy-status" hidden></p>
       </form>
     </dialog>
 

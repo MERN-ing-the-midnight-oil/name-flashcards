@@ -8,7 +8,7 @@ echo "Name Flashcards"
 echo "  This computer:  http://127.0.0.1:${PORT}"
 if [[ -n "${IP}" ]]; then
   echo "  Your phone:     http://${IP}:${PORT}"
-  echo "  (same Wi-Fi, then Add to Home Screen if you want)"
+  echo "  iPhone: open that URL in Safari, then Share → Add to Home Screen."
 fi
 echo
 python3 -m http.server "$PORT"

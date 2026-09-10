@@ -1,9 +1,4 @@
-const STORAGE_KEY = "name-flashcards-v2";
-const LEGACY_KEY = "name-flashcards-v1";
-const RECENT_LIMIT = 4;
-const FAST_MS = 2500;
-const UNSEEN_WEIGHT = 8;
-const OOPS_WEIGHT = 10;
+const STORAGE_KEY = "name-flashcards-v3-decks";
 const PRONUNCIATIONS = {
   "5459": "IN-der-jeet",
   "4148": "chuh-RUN-jeet",
@@ -12,133 +7,25 @@ const PRONUNCIATIONS = {
   "3591": "Ahs-Pee",
 };
 
-const studyView = document.getElementById("study-view");
-const namesView = document.getElementById("names-view");
-const card = document.getElementById("card");
-const photoWrap = document.getElementById("photo-wrap");
-const photoWrapBack = document.getElementById("photo-wrap-back");
-const revealedName = document.getElementById("revealed-name");
-const revealedTitle = document.getElementById("revealed-title");
-const revealedSay = document.getElementById("revealed-say");
-const progressLabel = document.getElementById("progress-label");
-const progressBar = document.getElementById("progress-bar");
-const rosterEl = document.getElementById("roster");
-const searchInput = document.getElementById("search");
-const editDialog = document.getElementById("edit-dialog");
-const editInput = document.getElementById("edit-input");
-const editFullName = document.getElementById("edit-full-name");
+const learningDeck = document.getElementById("learning-deck");
+const knowDeck = document.getElementById("know-deck");
+const learningCount = document.getElementById("learning-count");
+const knowCount = document.getElementById("know-count");
+const installDialog = document.getElementById("install-dialog");
+const installLink = document.getElementById("install-link");
+const copyStatus = document.getElementById("copy-status");
 
+const peopleById = new Map();
 let people = [];
-let current = null;
-let editingId = null;
-let flipped = false;
-let shownAt = 0;
-let pausedAt = 0;
-let pausedMs = 0;
-let recentIds = [];
-let unsureThisCard = false;
+let learningIds = [];
+let knowIds = [];
+let drag = null;
 
-function emptyState() {
-  return { names: {}, stats: {} };
-}
-
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      return { names: parsed.names || {}, stats: parsed.stats || {} };
-    }
-    const legacyRaw = localStorage.getItem(LEGACY_KEY);
-    if (!legacyRaw) return emptyState();
-    const legacy = JSON.parse(legacyRaw);
-    const stats = {};
-    Object.keys(legacy.known || {}).forEach((id) => {
-      stats[id] = {
-        gotItCount: 1,
-        oopsCount: 0,
-        avgMs: FAST_MS,
-        lastResult: "got-it",
-        lastSeenAt: 0,
-      };
-    });
-    const migrated = { names: legacy.names || {}, stats };
-    saveState(migrated);
-    return migrated;
-  } catch {
-    return emptyState();
-  }
-}
-
-function saveState(state) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-function displayName(person) {
-  return loadState().names[person.id] || person.firstName;
-}
-
-function personStats(id) {
-  return loadState().stats[id] || {
-    gotItCount: 0,
-    oopsCount: 0,
-    avgMs: 0,
-    lastResult: null,
-    lastSeenAt: 0,
-  };
-}
-
-function updateStats(id, patch) {
-  const state = loadState();
-  state.stats[id] = { ...personStats(id), ...patch };
-  saveState(state);
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function elapsedMs() {
-  if (!shownAt) return FAST_MS;
-  const openPause = pausedAt ? Date.now() - pausedAt : 0;
-  return clamp(Date.now() - shownAt - pausedMs - openPause, 400, 45000);
-}
-
-function pauseTimer() {
-  if (!pausedAt) pausedAt = Date.now();
-}
-
-function resumeTimer() {
-  if (!pausedAt) return;
-  pausedMs += Date.now() - pausedAt;
-  pausedAt = 0;
-}
-
-function cardWeight(person) {
-  const stats = personStats(person.id);
-  if (stats.lastResult === "oops") return OOPS_WEIGHT;
-  if (!stats.gotItCount) return UNSEEN_WEIGHT;
-  return clamp(stats.avgMs / FAST_MS, 0.4, 5);
-}
-
-function pickNext() {
-  const hardExclude = new Set(recentIds.slice(-2));
-  if (current) hardExclude.add(current.id);
-
-  let candidates = people.filter((person) => !hardExclude.has(person.id));
-  if (candidates.length < 8) {
-    candidates = people.filter((person) => person.id !== current?.id);
-  }
-  if (!candidates.length) candidates = [...people];
-
-  const weights = candidates.map((person) => cardWeight(person));
-  const total = weights.reduce((sum, weight) => sum + weight, 0);
-  let ticket = Math.random() * total;
-  for (let i = 0; i < candidates.length; i += 1) {
-    ticket -= weights[i];
-    if (ticket <= 0) return candidates[i];
-  }
-  return candidates[candidates.length - 1];
+function isStandalone() {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true
+  );
 }
 
 function escapeHTML(value) {
@@ -149,278 +36,432 @@ function escapeHTML(value) {
     .replaceAll('"', "&quot;");
 }
 
-function initials(person) {
-  return escapeHTML(displayName(person).slice(0, 1).toUpperCase());
+function loadDecks(people) {
+  const allIds = people.map((person) => person.id);
+  const known = new Set(allIds);
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { learning: allIds, know: [] };
+    const parsed = JSON.parse(raw);
+    const learning = (parsed.learning || []).filter((id) => known.has(id));
+    const know = (parsed.know || []).filter((id) => known.has(id) && !learning.includes(id));
+    const placed = new Set([...learning, ...know]);
+    const newcomers = allIds.filter((id) => !placed.has(id));
+    return { learning: [...learning, ...newcomers], know };
+  } catch {
+    return { learning: allIds, know: [] };
+  }
 }
 
-function photoHTML(person, className = "") {
+function saveDecks() {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ learning: learningIds, know: knowIds })
+  );
+}
+
+function photoHTML(person) {
   if (person.photo) {
-    return `<img class="${className}" src="${person.photo}" alt="" />`;
+    return `<img src="${escapeHTML(person.photo)}" alt="" />`;
   }
-  return `<div class="initials ${className}">${initials(person)}</div>`;
+  const letter = escapeHTML((person.firstName || "?").slice(0, 1).toUpperCase());
+  return `<div class="initials">${letter}</div>`;
 }
 
-function formatSeconds(ms) {
-  if (!ms) return "";
-  return `${(ms / 1000).toFixed(1)}s`;
+function cardHTML(person) {
+  const say = person.pronunciation
+    ? `<div class="card-say">${escapeHTML(person.pronunciation)}</div>`
+    : "";
+  return `
+    <div class="card-photo">${photoHTML(person)}</div>
+    <div class="card-name">${escapeHTML(person.firstName)}</div>
+    ${say}
+  `;
 }
 
-function updateProgress() {
-  const state = loadState();
-  const solid = people.filter((person) => state.stats[person.id]?.lastResult === "got-it").length;
-  const total = people.length || 1;
-  progressLabel.textContent = `${solid}/${people.length} solid`;
-  progressBar.style.width = `${(solid / total) * 100}%`;
-}
-
-function showView(name) {
-  studyView.classList.toggle("hidden", name !== "study");
-  namesView.classList.toggle("hidden", name !== "names");
-  document.getElementById("tab-study").classList.toggle("is-active", name === "study");
-  document.getElementById("tab-names").classList.toggle("is-active", name === "names");
-}
-
-function showNameSide() {
-  if (!current) return;
-  photoWrapBack.innerHTML = photoHTML(current);
-  revealedName.textContent = displayName(current);
-  if (revealedSay) {
-    revealedSay.textContent = current.pronunciation ? '"' + current.pronunciation + '"' : "";
-  }
-  revealedTitle.textContent = current.title || "";
-}
-
-function clearNameSide() {
-  photoWrapBack.innerHTML = "";
-  revealedName.textContent = "";
-  if (revealedSay) revealedSay.textContent = "";
-  revealedTitle.textContent = "";
-}
-
-function snapToPhotoSide() {
-  flipped = false;
-  card.classList.add("no-flip");
-  card.classList.remove("is-flipped");
-  clearNameSide();
-  void card.offsetWidth;
-}
-
-function preloadPhoto(person) {
-  if (!person.photo) return Promise.resolve();
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = resolve;
-    img.onerror = resolve;
-    img.src = person.photo;
+function bindCard(cardEl) {
+  cardEl.draggable = true;
+  cardEl.addEventListener("pointerdown", onPointerDown);
+  cardEl.addEventListener("dragstart", (event) => {
+    drag = { id: cardEl.dataset.id, cardEl, mode: "html5" };
+    cardEl.classList.add("dragging");
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", cardEl.dataset.id);
+  });
+  cardEl.addEventListener("dragend", () => {
+    cardEl.classList.remove("dragging");
+    setDeckTarget(null);
+    if (drag?.mode === "html5") drag = null;
   });
 }
 
-function flipToName() {
-  showNameSide();
-  flipped = true;
-  card.classList.remove("no-flip");
-  card.classList.add("is-flipped");
+function createCard(person) {
+  const cardEl = document.createElement("article");
+  cardEl.className = "card";
+  cardEl.dataset.id = person.id;
+  cardEl.setAttribute("role", "button");
+  cardEl.setAttribute("aria-label", `Move ${person.firstName}`);
+  cardEl.innerHTML = cardHTML(person);
+  bindCard(cardEl);
+  return cardEl;
 }
 
-function renderCard() {
-  if (!current) return;
-  const person = current;
-  shownAt = Date.now();
-  pausedAt = 0;
-  pausedMs = 0;
-  unsureThisCard = false;
-  snapToPhotoSide();
-  photoWrap.innerHTML = "";
-  preloadPhoto(person).then(() => {
-    if (current !== person) return;
-    photoWrap.innerHTML = photoHTML(person);
-    requestAnimationFrame(() => card.classList.remove("no-flip"));
-  });
-}
-
-function nextCard() {
-  current = pickNext();
-  if (!current) return;
-  recentIds.push(current.id);
-  if (recentIds.length > 12) recentIds = recentIds.slice(-RECENT_LIMIT * 3);
-  showView("study");
-  renderCard();
-  updateProgress();
-}
-
-function recordGotIt() {
-  if (!current) return;
-  if (unsureThisCard) {
-    nextCard();
+function renderDeck(container, ids, emptyMarkup) {
+  container.replaceChildren();
+  if (!ids.length) {
+    container.insertAdjacentHTML("afterbegin", emptyMarkup);
     return;
   }
-  const previous = personStats(current.id);
-  const time = elapsedMs();
-  const avgMs = previous.avgMs ? previous.avgMs * 0.65 + time * 0.35 : time;
-  updateStats(current.id, {
-    gotItCount: previous.gotItCount + 1,
-    avgMs,
-    lastMs: time,
-    lastResult: "got-it",
-    lastSeenAt: Date.now(),
+  const fragment = document.createDocumentFragment();
+  ids.forEach((id) => {
+    const person = peopleById.get(id);
+    if (person) fragment.appendChild(createCard(person));
   });
-  nextCard();
+  container.appendChild(fragment);
 }
 
-function recordOops() {
-  if (!current) return;
-  if (!unsureThisCard) {
-    const previous = personStats(current.id);
-    updateStats(current.id, {
-      oopsCount: previous.oopsCount + 1,
-      lastResult: "oops",
-      lastSeenAt: Date.now(),
+function render() {
+  renderDeck(
+    learningDeck,
+    learningIds,
+    '<div class="empty-state"><div class="empty-icon">✓</div><div>All done!</div></div>'
+  );
+  renderDeck(
+    knowDeck,
+    knowIds,
+    '<div class="empty-state"><div class="empty-icon">→</div><div>Start dragging!</div></div>'
+  );
+  learningCount.textContent = String(learningIds.length);
+  knowCount.textContent = String(knowIds.length);
+}
+
+function moveCard(id, toDeck) {
+  const fromLearning = learningIds.includes(id);
+  const alreadyThere =
+    (toDeck === "learning" && fromLearning) || (toDeck === "know" && !fromLearning);
+  if (alreadyThere) return;
+
+  if (fromLearning) {
+    learningIds = learningIds.filter((item) => item !== id);
+    knowIds.push(id);
+  } else {
+    knowIds = knowIds.filter((item) => item !== id);
+    learningIds.push(id);
+  }
+  saveDecks();
+  render();
+}
+
+function shuffle(ids) {
+  const next = [...ids];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+}
+
+function deckAtPoint(x, y) {
+  const stack = document.elementsFromPoint(x, y);
+  const node = stack.find((el) => el.closest && el.closest("[data-deck]"));
+  return node ? node.closest("[data-deck]").dataset.deck : null;
+}
+
+function setDeckTarget(name) {
+  document.querySelectorAll("[data-deck]").forEach((deck) => {
+    deck.classList.toggle("is-target", Boolean(name) && deck.dataset.deck === name);
+  });
+}
+
+function startDrag(cardEl, event) {
+  const rect = cardEl.getBoundingClientRect();
+  const ghost = cardEl.cloneNode(true);
+  ghost.classList.add("card-ghost");
+  ghost.style.width = `${rect.width}px`;
+  ghost.style.left = `${rect.left}px`;
+  ghost.style.top = `${rect.top}px`;
+  document.body.appendChild(ghost);
+  cardEl.classList.add("dragging");
+  document.body.classList.add("is-dragging");
+  try {
+    cardEl.setPointerCapture(event.pointerId);
+  } catch {
+    /* capture is unavailable for some synthetic events */
+  }
+  drag = {
+    id: cardEl.dataset.id,
+    cardEl,
+    ghost,
+    pointerId: event.pointerId,
+    offsetX: event.clientX - rect.left,
+    offsetY: event.clientY - rect.top,
+  };
+}
+
+function moveGhost(event) {
+  if (!drag) return;
+  drag.ghost.style.left = `${event.clientX - drag.offsetX}px`;
+  drag.ghost.style.top = `${event.clientY - drag.offsetY}px`;
+  setDeckTarget(deckAtPoint(event.clientX, event.clientY));
+}
+
+function endDrag(event) {
+  if (!drag) return;
+  const target = deckAtPoint(event.clientX, event.clientY) ||
+    (event.clientX < window.innerWidth / 2 ? "learning" : "know");
+  const id = drag.id;
+  drag.ghost.remove();
+  drag.cardEl.classList.remove("dragging");
+  document.body.classList.remove("is-dragging");
+  setDeckTarget(null);
+  try {
+    drag.cardEl.releasePointerCapture(drag.pointerId);
+  } catch {
+    /* already released */
+  }
+  drag = null;
+  if (target) moveCard(id, target);
+}
+
+function setupDropZones() {
+  document.querySelectorAll("[data-deck]").forEach((deck) => {
+    deck.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDeckTarget(deck.dataset.deck);
     });
-    unsureThisCard = true;
-    updateProgress();
-  }
-  if (!flipped) {
-    flipToName();
-    return;
-  }
-  nextCard();
-}
-
-function openEditor(person) {
-  editingId = person.id;
-  pauseTimer();
-  editFullName.textContent = person.fullName;
-  editInput.value = displayName(person);
-  editDialog.showModal();
-  requestAnimationFrame(() => {
-    editInput.focus();
-    editInput.select();
+    deck.addEventListener("dragleave", (event) => {
+      if (!deck.contains(event.relatedTarget)) setDeckTarget(null);
+    });
+    deck.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const id = drag?.id || event.dataTransfer.getData("text/plain");
+      setDeckTarget(null);
+      if (id) moveCard(id, deck.dataset.deck);
+      drag = null;
+    });
   });
 }
 
-function rosterNote(person) {
-  const stats = personStats(person.id);
-  const bits = [person.fullName];
-  if (person.title) bits[0] += ` · ${person.title}`;
-  if (person.pronunciation) bits.push(person.pronunciation);
-  if (stats.lastResult === "oops") bits.push("missed last time");
-  else if (stats.avgMs) bits.push(`${formatSeconds(stats.avgMs)} avg`);
-  return bits.join(" · ");
+function onPointerDown(event) {
+  if (event.pointerType === "mouse") return;
+  if (event.button !== 0 && event.pointerType === "mouse") return;
+  const cardEl = event.currentTarget;
+  const startX = event.clientX;
+  const startY = event.clientY;
+  let started = false;
+  let aborted = false;
+
+  const onMove = (moveEvent) => {
+    if (aborted) return;
+    const dx = moveEvent.clientX - startX;
+    const dy = moveEvent.clientY - startY;
+    if (!started) {
+      if (Math.abs(dy) > 8 && Math.abs(dy) >= Math.abs(dx)) {
+        aborted = true;
+        cleanup();
+        return;
+      }
+      if (Math.hypot(dx, dy) < 8) return;
+      started = true;
+      startDrag(cardEl, moveEvent);
+    }
+    moveEvent.preventDefault();
+    moveGhost(moveEvent);
+  };
+
+  const onUp = (upEvent) => {
+    cleanup();
+    if (started) endDrag(upEvent);
+  };
+
+  const cleanup = () => {
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+    window.removeEventListener("pointercancel", onUp);
+  };
+
+  window.addEventListener("pointermove", onMove, { passive: false });
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
 }
 
-function renderRoster() {
-  const query = searchInput.value.trim().toLowerCase();
-  const rows = people.filter((person) => {
-    const haystack = `${displayName(person)} ${person.fullName} ${person.title} ${person.pronunciation || ""}`.toLowerCase();
-    return haystack.includes(query);
-  });
-  rosterEl.innerHTML = rows
-    .map((person) => {
-      const stats = personStats(person.id);
-      const statusClass =
-        stats.lastResult === "got-it" ? "is-known" : stats.lastResult === "oops" ? "is-oops" : "";
-      return `
-      <li class="person ${statusClass}">
-        ${photoHTML(person)}
-        <button class="name" type="button" data-edit="${escapeHTML(person.id)}">
-          ${escapeHTML(displayName(person))}
-          <span class="title">${escapeHTML(rosterNote(person))}</span>
-        </button>
-        <span class="known-dot"></span>
-      </li>`;
-    })
-    .join("");
-}
-
-document.getElementById("tab-study").addEventListener("click", () => {
-  resumeTimer();
-  showView("study");
-  if (!current) nextCard();
+document.getElementById("shuffle-btn").addEventListener("click", () => {
+  learningIds = shuffle(learningIds);
+  saveDecks();
+  render();
 });
 
-document.getElementById("tab-names").addEventListener("click", () => {
-  pauseTimer();
-  renderRoster();
-  showView("names");
-});
-
-card.addEventListener("click", () => {
-  flipped = !flipped;
-  if (flipped) showNameSide();
-  card.classList.remove("no-flip");
-  card.classList.toggle("is-flipped", flipped);
-});
-
-document.getElementById("oops-btn").addEventListener("click", recordOops);
-document.getElementById("got-it-btn").addEventListener("click", recordGotIt);
-document.getElementById("shuffle-btn").addEventListener("click", nextCard);
 document.getElementById("reset-btn").addEventListener("click", () => {
-  const state = loadState();
-  state.stats = {};
-  saveState(state);
-  recentIds = [];
-  renderRoster();
-  updateProgress();
-});
-document.getElementById("edit-btn").addEventListener("click", () => {
-  if (current) openEditor(current);
-});
-document.getElementById("restore-btn").addEventListener("click", () => {
-  const person = people.find((item) => item.id === editingId);
-  if (person) editInput.value = person.firstName;
+  learningIds = [...peopleById.keys()];
+  knowIds = [];
+  saveDecks();
+  render();
 });
 
-document.getElementById("edit-form").addEventListener("submit", (event) => {
-  event.preventDefault();
-  if (!editingId) {
-    editDialog.close();
-    return;
+if (installLink && installDialog) {
+  installLink.addEventListener("click", () => {
+    if (copyStatus) copyStatus.hidden = true;
+    installDialog.showModal();
+  });
+}
+
+const copyLinkBtn = document.getElementById("copy-link-btn");
+if (copyLinkBtn) {
+  copyLinkBtn.addEventListener("click", async () => {
+    if (!copyStatus) return;
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      copyStatus.textContent = "Link copied. Open it in Safari on your iPhone.";
+    } catch {
+      copyStatus.textContent = window.location.href;
+    }
+    copyStatus.hidden = false;
+  });
+}
+
+const downloadBtn = document.getElementById("download-btn");
+if (downloadBtn) {
+  downloadBtn.addEventListener("click", () => {
+    downloadStandalone();
+  });
+}
+
+function blobToDataURL(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function downloadStandalone() {
+  const button = document.getElementById("download-btn");
+  button.disabled = true;
+  copyStatus.hidden = false;
+  copyStatus.textContent = "Preparing file…";
+  try {
+    const [css, script] = await Promise.all([
+      fetch("./styles.css").then((response) => response.text()),
+      fetch("./app.js").then((response) => response.text()),
+    ]);
+    const packed = [];
+    for (let i = 0; i < people.length; i += 1) {
+      const person = people[i];
+      copyStatus.textContent = `Preparing file… ${i + 1}/${people.length}`;
+      let photo = null;
+      if (person.photo) {
+        try {
+          const blob = await fetch(person.photo).then((response) => {
+            if (!response.ok) throw new Error("photo");
+            return response.blob();
+          });
+          photo = await blobToDataURL(blob);
+        } catch {
+          photo = null;
+        }
+      }
+      packed.push({ ...person, photo });
+    }
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Names" />
+  <title>Name Flashcards</title>
+  <style>${css}</style>
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <h1>Transportation Names</h1>
+      <p>Drag cards between decks</p>
+    </header>
+    <div class="controls">
+      <button class="shuffle-btn" id="shuffle-btn" type="button">Shuffle</button>
+      <button class="reset-btn" id="reset-btn" type="button">Reset all</button>
+    </div>
+    <div class="decks-container">
+      <section class="deck deck-learning" data-deck="learning">
+        <div class="deck-header">
+          <div class="deck-title">Still Learning</div>
+          <div class="deck-count"><span id="learning-count">0</span> cards</div>
+        </div>
+        <div class="deck-cards" id="learning-deck"></div>
+      </section>
+      <section class="deck deck-know" data-deck="know">
+        <div class="deck-header">
+          <div class="deck-title">Got It!</div>
+          <div class="deck-count"><span id="know-count">0</span> cards</div>
+        </div>
+        <div class="deck-cards" id="know-deck"></div>
+      </section>
+    </div>
+    <button class="install-link" id="install-link" type="button">Add to iPhone</button>
+  </div>
+  <dialog id="install-dialog">
+    <form method="dialog" class="install-sheet">
+      <h2>Put this on your iPhone</h2>
+      <p class="install-lead">Open this page in Safari, tap Share, then Add to Home Screen.</p>
+      <button class="shuffle-btn install-done" value="close" type="submit">Done</button>
+    </form>
+  </dialog>
+  <script>window.EMBEDDED_PEOPLE = ${JSON.stringify(packed)};</script>
+  <script>${script}</script>
+</body>
+</html>`;
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Name-Flashcards.html";
+    link.click();
+    URL.revokeObjectURL(url);
+    copyStatus.textContent = "Downloaded Name-Flashcards.html";
+  } catch (error) {
+    console.error(error);
+    copyStatus.textContent = "Could not build the file. Try again on this page.";
+  } finally {
+    button.disabled = false;
   }
-  const state = loadState();
-  const value = editInput.value.trim();
-  const person = people.find((item) => item.id === editingId);
-  if (value && person && value !== person.firstName) state.names[editingId] = value;
-  else delete state.names[editingId];
-  saveState(state);
-  if (current && current.id === editingId) revealedName.textContent = displayName(current);
-  renderRoster();
-  editDialog.close();
-});
+}
 
-document.getElementById("cancel-edit-btn").addEventListener("click", () => {
-  editDialog.close();
-});
+if (isStandalone()) {
+  document.body.classList.add("is-standalone");
+}
 
-editDialog.addEventListener("close", () => {
-  if (!namesView.classList.contains("hidden")) return;
-  resumeTimer();
-});
-
-rosterEl.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-edit]");
-  if (!button) return;
-  const person = people.find((item) => item.id === button.dataset.edit);
-  if (person) openEditor(person);
-});
-
-searchInput.addEventListener("input", renderRoster);
-
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && window.location.protocol !== "file:") {
   navigator.serviceWorker.register("./sw.js").catch(() => {});
+}
+
+async function loadPeople() {
+  if (Array.isArray(window.EMBEDDED_PEOPLE)) return window.EMBEDDED_PEOPLE;
+  const response = await fetch("./data/people.json", { cache: "no-store" });
+  if (!response.ok) throw new Error("Could not load names");
+  return response.json();
 }
 
 async function start() {
   try {
-    const response = await fetch("./data/people.json", { cache: "no-store" });
-    if (!response.ok) throw new Error("Could not load names");
-    people = await response.json();
+    people = await loadPeople();
     people.forEach((person) => {
-      person.pronunciation = PRONUNCIATIONS[person.id] || "";
+      person.pronunciation = person.pronunciation || PRONUNCIATIONS[person.id] || "";
+      peopleById.set(person.id, person);
     });
-    nextCard();
+    const decks = loadDecks(people);
+    learningIds = decks.learning;
+    knowIds = decks.know;
+    setupDropZones();
+    render();
   } catch (error) {
     console.error(error);
-    progressLabel.textContent = "Could not load names";
+    learningDeck.innerHTML =
+      '<div class="empty-state"><div>Could not load names</div></div>';
   }
 }
 
