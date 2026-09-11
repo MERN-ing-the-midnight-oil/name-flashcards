@@ -20,6 +20,7 @@ let people = [];
 let learningIds = [];
 let knowIds = [];
 let drag = null;
+let skipClick = false;
 
 function isStandalone() {
   return (
@@ -82,7 +83,9 @@ function cardHTML(person) {
 function bindCard(cardEl) {
   cardEl.draggable = true;
   cardEl.addEventListener("pointerdown", onPointerDown);
+  cardEl.addEventListener("click", onCardClick);
   cardEl.addEventListener("dragstart", (event) => {
+    skipClick = true;
     drag = { id: cardEl.dataset.id, cardEl, mode: "html5" };
     cardEl.classList.add("dragging");
     event.dataTransfer.effectAllowed = "move";
@@ -100,10 +103,28 @@ function createCard(person) {
   cardEl.className = "card";
   cardEl.dataset.id = person.id;
   cardEl.setAttribute("role", "button");
-  cardEl.setAttribute("aria-label", `Move ${person.firstName}`);
+  cardEl.setAttribute("aria-label", "Staff photo, tap to see name");
   cardEl.innerHTML = cardHTML(person);
   bindCard(cardEl);
   return cardEl;
+}
+
+function toggleReveal(cardEl) {
+  cardEl.classList.toggle("is-revealed");
+  const person = peopleById.get(cardEl.dataset.id);
+  const revealed = cardEl.classList.contains("is-revealed");
+  cardEl.setAttribute(
+    "aria-label",
+    revealed && person ? person.firstName : "Staff photo, tap to see name"
+  );
+}
+
+function onCardClick(event) {
+  if (skipClick) {
+    skipClick = false;
+    return;
+  }
+  toggleReveal(event.currentTarget);
 }
 
 function renderDeck(container, ids, emptyMarkup) {
@@ -272,7 +293,9 @@ function onPointerDown(event) {
 
   const onUp = (upEvent) => {
     cleanup();
+    skipClick = true;
     if (started) endDrag(upEvent);
+    else toggleReveal(cardEl);
   };
 
   const cleanup = () => {
@@ -380,7 +403,7 @@ async function downloadStandalone() {
   <div id="app">
     <header class="header">
       <h1>Transportation Names</h1>
-      <p>Drag cards between decks</p>
+      <p>Tap a photo to see the name, then drag</p>
     </header>
     <div class="controls">
       <button class="shuffle-btn" id="shuffle-btn" type="button">Shuffle</button>
