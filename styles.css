@@ -132,7 +132,6 @@ button {
 .deck-cards {
   flex: 1;
   overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
@@ -156,7 +155,8 @@ button {
 }
 
 .card.dragging {
-  opacity: 0.35;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .card-photo {
@@ -275,9 +275,20 @@ body.is-standalone .install-link {
   transform: rotate(2deg) scale(1.03);
 }
 
+@media (pointer: coarse) {
+  .card {
+    -webkit-user-drag: none;
+  }
+}
+
 body.is-dragging {
   cursor: grabbing;
   user-select: none;
+  touch-action: none;
+}
+
+body.is-dragging .deck-cards {
+  overflow: hidden;
 }
 
 dialog {

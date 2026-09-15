@@ -82,9 +82,18 @@ function cardHTML(person) {
 
 function bindCard(cardEl) {
   cardEl.draggable = true;
+  cardEl.querySelectorAll("img").forEach((img) => {
+    img.draggable = false;
+  });
   cardEl.addEventListener("pointerdown", onPointerDown);
   cardEl.addEventListener("click", onCardClick);
   cardEl.addEventListener("dragstart", (event) => {
+    // Touch uses a cloned ghost. Native HTML5 DnD would overwrite `drag`
+    // and leave that clone stuck in the original column.
+    if (!cardEl.draggable || drag?.ghost) {
+      event.preventDefault();
+      return;
+    }
     skipClick = true;
     drag = { id: cardEl.dataset.id, cardEl, mode: "html5" };
     cardEl.classList.add("dragging");
@@ -92,9 +101,7 @@ function bindCard(cardEl) {
     event.dataTransfer.setData("text/plain", cardEl.dataset.id);
   });
   cardEl.addEventListener("dragend", () => {
-    cardEl.classList.remove("dragging");
-    setDeckTarget(null);
-    if (drag?.mode === "html5") drag = null;
+    teardownDrag({ releaseCapture: false });
   });
 }
 
@@ -141,7 +148,17 @@ function renderDeck(container, ids, emptyMarkup) {
   container.appendChild(fragment);
 }
 
+function invalidateDeckPaint(container) {
+  const top = container.scrollTop;
+  container.style.overflow = "hidden";
+  void container.offsetHeight;
+  container.style.overflow = "";
+  container.scrollTop = top;
+}
+
 function render() {
+  document.querySelectorAll(".card-ghost").forEach((el) => el.remove());
+  document.body.classList.remove("is-dragging");
   renderDeck(
     learningDeck,
     learningIds,
@@ -154,6 +171,8 @@ function render() {
   );
   learningCount.textContent = String(learningIds.length);
   knowCount.textContent = String(knowIds.length);
+  invalidateDeckPaint(learningDeck);
+  invalidateDeckPaint(knowDeck);
 }
 
 function moveCard(id, toDeck) {
@@ -198,6 +217,8 @@ function startDrag(cardEl, event) {
   const rect = cardEl.getBoundingClientRect();
   const ghost = cardEl.cloneNode(true);
   ghost.classList.add("card-ghost");
+  ghost.draggable = false;
+  ghost.removeAttribute("role");
   ghost.style.width = `${rect.width}px`;
   ghost.style.left = `${rect.left}px`;
   ghost.style.top = `${rect.top}px`;
@@ -220,10 +241,28 @@ function startDrag(cardEl, event) {
 }
 
 function moveGhost(event) {
-  if (!drag) return;
+  if (!drag?.ghost) return;
   drag.ghost.style.left = `${event.clientX - drag.offsetX}px`;
   drag.ghost.style.top = `${event.clientY - drag.offsetY}px`;
   setDeckTarget(deckAtPoint(event.clientX, event.clientY));
+}
+
+function teardownDrag({ releaseCapture = true } = {}) {
+  const current = drag;
+  document.querySelectorAll(".card-ghost").forEach((el) => el.remove());
+  document.body.classList.remove("is-dragging");
+  document.querySelectorAll(".card.dragging").forEach((el) => {
+    el.classList.remove("dragging");
+  });
+  setDeckTarget(null);
+  if (releaseCapture && current?.cardEl && current.pointerId != null) {
+    try {
+      current.cardEl.releasePointerCapture(current.pointerId);
+    } catch {
+      /* already released */
+    }
+  }
+  drag = null;
 }
 
 function endDrag(event) {
@@ -231,17 +270,12 @@ function endDrag(event) {
   const target = deckAtPoint(event.clientX, event.clientY) ||
     (event.clientX < window.innerWidth / 2 ? "learning" : "know");
   const id = drag.id;
-  drag.ghost.remove();
-  drag.cardEl.classList.remove("dragging");
-  document.body.classList.remove("is-dragging");
-  setDeckTarget(null);
-  try {
-    drag.cardEl.releasePointerCapture(drag.pointerId);
-  } catch {
-    /* already released */
-  }
-  drag = null;
+  teardownDrag();
   if (target) moveCard(id, target);
+}
+
+function cancelDrag() {
+  teardownDrag();
 }
 
 function setupDropZones() {
@@ -257,17 +291,17 @@ function setupDropZones() {
     deck.addEventListener("drop", (event) => {
       event.preventDefault();
       const id = drag?.id || event.dataTransfer.getData("text/plain");
-      setDeckTarget(null);
+      teardownDrag({ releaseCapture: false });
       if (id) moveCard(id, deck.dataset.deck);
-      drag = null;
     });
   });
 }
 
 function onPointerDown(event) {
   if (event.pointerType === "mouse") return;
-  if (event.button !== 0 && event.pointerType === "mouse") return;
+  if (event.button !== 0) return;
   const cardEl = event.currentTarget;
+  cardEl.draggable = false;
   const startX = event.clientX;
   const startY = event.clientY;
   let started = false;
@@ -298,15 +332,22 @@ function onPointerDown(event) {
     else toggleReveal(cardEl);
   };
 
+  const onCancel = () => {
+    cleanup();
+    skipClick = true;
+    if (started) cancelDrag();
+  };
+
   const cleanup = () => {
+    cardEl.draggable = true;
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
-    window.removeEventListener("pointercancel", onUp);
+    window.removeEventListener("pointercancel", onCancel);
   };
 
   window.addEventListener("pointermove", onMove, { passive: false });
   window.addEventListener("pointerup", onUp);
-  window.addEventListener("pointercancel", onUp);
+  window.addEventListener("pointercancel", onCancel);
 }
 
 document.getElementById("shuffle-btn").addEventListener("click", () => {
