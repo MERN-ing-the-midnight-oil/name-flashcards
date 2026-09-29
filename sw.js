@@ -1,4 +1,4 @@
-const CACHE = "name-flashcards-v13";
+const CACHE = "name-flashcards-v15";
 const PRECACHE = [
   "./",
   "./index.html",

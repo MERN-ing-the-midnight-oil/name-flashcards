@@ -1,4 +1,5 @@
 const STORAGE_KEY = "name-flashcards-v3-decks";
+const CUSTOM_KEY = "name-flashcards-v4-custom";
 const PRONUNCIATIONS = {
   "5459": "IN-der-jeet",
   "4148": "chuh-RUN-jeet",
@@ -14,13 +15,25 @@ const knowCount = document.getElementById("know-count");
 const installDialog = document.getElementById("install-dialog");
 const installLink = document.getElementById("install-link");
 const copyStatus = document.getElementById("copy-status");
+const cardDialog = document.getElementById("card-dialog");
+const cardForm = document.getElementById("card-form");
+const cardDialogTitle = document.getElementById("card-dialog-title");
+const cardDialogHelp = document.getElementById("card-dialog-help");
+const cardPhotoInput = document.getElementById("card-photo-input");
+const cardPhotoPreview = document.getElementById("card-photo-preview");
+const cardNameInput = document.getElementById("card-name-input");
+const restoreNameBtn = document.getElementById("restore-name-btn");
+const deleteCardBtn = document.getElementById("delete-card-btn");
 
 const peopleById = new Map();
 let people = [];
+let customNames = {};
 let learningIds = [];
 let knowIds = [];
 let drag = null;
 let skipClick = false;
+let editingId = null;
+let pendingPhoto = null;
 
 function isStandalone() {
   return (
@@ -61,11 +74,46 @@ function saveDecks() {
   );
 }
 
+function emptyCustom() {
+  return { names: {}, cards: [] };
+}
+
+function loadCustom() {
+  try {
+    const raw = localStorage.getItem(CUSTOM_KEY);
+    if (!raw) return emptyCustom();
+    const parsed = JSON.parse(raw);
+    return {
+      names: parsed.names && typeof parsed.names === "object" ? parsed.names : {},
+      cards: Array.isArray(parsed.cards) ? parsed.cards : [],
+    };
+  } catch {
+    return emptyCustom();
+  }
+}
+
+function saveCustom() {
+  const cards = people
+    .filter((person) => person.custom)
+    .map((person) => ({
+      id: person.id,
+      firstName: person.firstName,
+      fullName: person.fullName || person.firstName,
+      photo: person.photo || null,
+      custom: true,
+    }));
+  localStorage.setItem(CUSTOM_KEY, JSON.stringify({ names: customNames, cards }));
+}
+
+function displayName(person) {
+  return (customNames[person.id] || person.firstName || "").trim();
+}
+
 function photoHTML(person) {
   if (person.photo) {
     return `<img src="${escapeHTML(person.photo)}" alt="" />`;
   }
-  const letter = escapeHTML((person.firstName || "?").slice(0, 1).toUpperCase());
+  const letter = escapeHTML((displayName(person) || "?").slice(0, 1).toUpperCase());
   return `<div class="initials">${letter}</div>`;
 }
 
@@ -75,19 +123,24 @@ function cardHTML(person) {
     : "";
   return `
     <div class="card-photo">${photoHTML(person)}</div>
-    <div class="card-name">${escapeHTML(person.firstName)}</div>
+    <div class="card-name">${escapeHTML(displayName(person))}</div>
     ${say}
+    <button class="edit-name-btn" type="button" data-edit="${escapeHTML(person.id)}">Edit</button>
   `;
 }
 
 function bindCard(cardEl) {
   cardEl.draggable = true;
-  cardEl.querySelectorAll("img").forEach((img) => {
-    img.draggable = false;
+  cardEl.querySelectorAll("img, [data-edit]").forEach((el) => {
+    el.draggable = false;
   });
   cardEl.addEventListener("pointerdown", onPointerDown);
   cardEl.addEventListener("click", onCardClick);
   cardEl.addEventListener("dragstart", (event) => {
+    if (isEditControl(event.target)) {
+      event.preventDefault();
+      return;
+    }
     // Touch uses a cloned ghost. Native HTML5 DnD would overwrite `drag`
     // and leave that clone stuck in the original column.
     if (!cardEl.draggable || drag?.ghost) {
@@ -116,19 +169,28 @@ function createCard(person) {
   return cardEl;
 }
 
+function isEditControl(target) {
+  return Boolean(target && target.closest && target.closest("[data-edit]"));
+}
+
 function toggleReveal(cardEl) {
   cardEl.classList.toggle("is-revealed");
   const person = peopleById.get(cardEl.dataset.id);
   const revealed = cardEl.classList.contains("is-revealed");
   cardEl.setAttribute(
     "aria-label",
-    revealed && person ? person.firstName : "Staff photo, tap to see name"
+    revealed && person ? displayName(person) : "Staff photo, tap to see name"
   );
 }
 
 function onCardClick(event) {
   if (skipClick) {
     skipClick = false;
+    return;
+  }
+  if (isEditControl(event.target)) {
+    event.preventDefault();
+    openEditor(event.currentTarget.dataset.id);
     return;
   }
   toggleReveal(event.currentTarget);
@@ -300,6 +362,7 @@ function setupDropZones() {
 function onPointerDown(event) {
   if (event.pointerType === "mouse") return;
   if (event.button !== 0) return;
+  if (isEditControl(event.target)) return;
   const cardEl = event.currentTarget;
   cardEl.draggable = false;
   const startX = event.clientX;
@@ -329,6 +392,7 @@ function onPointerDown(event) {
     cleanup();
     skipClick = true;
     if (started) endDrag(upEvent);
+    else if (isEditControl(upEvent.target)) openEditor(cardEl.dataset.id);
     else toggleReveal(cardEl);
   };
 
@@ -350,6 +414,84 @@ function onPointerDown(event) {
   window.addEventListener("pointercancel", onCancel);
 }
 
+function setPhotoPickerVisible(visible) {
+  const picker = cardPhotoInput?.closest(".photo-picker");
+  if (picker) picker.hidden = !visible;
+}
+
+function setPhotoPreview(src) {
+  if (!cardPhotoPreview) return;
+  if (src) {
+    cardPhotoPreview.innerHTML = `<img src="${escapeHTML(src)}" alt="" />`;
+  } else {
+    cardPhotoPreview.textContent = "Tap to add a photo";
+  }
+}
+
+async function fileToPhoto(file) {
+  if (!file) return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxSize = 720;
+    const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return canvas.toDataURL("image/jpeg", 0.74);
+  } catch {
+    return blobToDataURL(file);
+  }
+}
+
+function openEditor(id) {
+  const person = peopleById.get(id);
+  if (!person || !cardDialog) return;
+  editingId = id;
+  pendingPhoto = person.custom ? person.photo || null : null;
+  cardDialogTitle.textContent = person.custom ? "Edit flashcard" : "Edit name";
+  cardDialogHelp.textContent = person.custom
+    ? "Change the name or photo, or delete this card."
+    : "Change the name shown on this card.";
+  cardNameInput.value = displayName(person);
+  cardPhotoInput.value = "";
+  cardPhotoInput.disabled = !person.custom;
+  setPhotoPickerVisible(person.custom);
+  setPhotoPreview(person.photo);
+  restoreNameBtn.hidden = person.custom || !customNames[person.id];
+  deleteCardBtn.hidden = !person.custom;
+  cardDialog.showModal();
+  requestAnimationFrame(() => {
+    cardNameInput.focus();
+    cardNameInput.select();
+  });
+}
+
+function openNewCard() {
+  editingId = null;
+  pendingPhoto = null;
+  cardDialogTitle.textContent = "New flashcard";
+  cardDialogHelp.textContent = "Add a photo and a name.";
+  cardNameInput.value = "";
+  cardPhotoInput.value = "";
+  cardPhotoInput.disabled = false;
+  setPhotoPickerVisible(true);
+  setPhotoPreview(null);
+  restoreNameBtn.hidden = true;
+  deleteCardBtn.hidden = true;
+  cardDialog.showModal();
+  requestAnimationFrame(() => cardNameInput.focus());
+}
+
+function closeCardDialog() {
+  editingId = null;
+  pendingPhoto = null;
+  if (cardPhotoInput) cardPhotoInput.value = "";
+  cardDialog?.close();
+}
+
 document.getElementById("shuffle-btn").addEventListener("click", () => {
   learningIds = shuffle(learningIds);
   saveDecks();
@@ -360,6 +502,85 @@ document.getElementById("reset-btn").addEventListener("click", () => {
   learningIds = [...peopleById.keys()];
   knowIds = [];
   saveDecks();
+  render();
+});
+
+document.getElementById("add-btn").addEventListener("click", openNewCard);
+
+if (cardPhotoInput) {
+  cardPhotoInput.addEventListener("change", async () => {
+    const file = cardPhotoInput.files && cardPhotoInput.files[0];
+    if (!file) return;
+    pendingPhoto = await fileToPhoto(file);
+    setPhotoPreview(pendingPhoto);
+  });
+}
+
+if (cardForm) {
+  cardForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const name = cardNameInput.value.trim();
+    if (!name) {
+      cardNameInput.focus();
+      return;
+    }
+    if (editingId) {
+      const person = peopleById.get(editingId);
+      if (!person) {
+        closeCardDialog();
+        return;
+      }
+      if (person.custom) {
+        person.firstName = name;
+        person.fullName = name;
+        if (pendingPhoto) person.photo = pendingPhoto;
+      } else if (name === person.firstName) {
+        delete customNames[person.id];
+      } else {
+        customNames[person.id] = name;
+      }
+      saveCustom();
+      closeCardDialog();
+      render();
+      return;
+    }
+    const person = {
+      id: `custom-${Date.now()}`,
+      firstName: name,
+      fullName: name,
+      title: "",
+      photo: pendingPhoto,
+      custom: true,
+    };
+    people.push(person);
+    peopleById.set(person.id, person);
+    learningIds.unshift(person.id);
+    saveCustom();
+    saveDecks();
+    closeCardDialog();
+    render();
+  });
+}
+
+document.getElementById("cancel-card-btn").addEventListener("click", closeCardDialog);
+
+restoreNameBtn.addEventListener("click", () => {
+  const person = peopleById.get(editingId);
+  if (person) cardNameInput.value = person.firstName;
+});
+
+deleteCardBtn.addEventListener("click", () => {
+  if (!editingId) return;
+  const person = peopleById.get(editingId);
+  if (!person?.custom) return;
+  people = people.filter((item) => item.id !== editingId);
+  peopleById.delete(editingId);
+  learningIds = learningIds.filter((id) => id !== editingId);
+  knowIds = knowIds.filter((id) => id !== editingId);
+  delete customNames[editingId];
+  saveCustom();
+  saveDecks();
+  closeCardDialog();
   render();
 });
 
@@ -449,6 +670,7 @@ async function downloadStandalone() {
     <div class="controls">
       <button class="shuffle-btn" id="shuffle-btn" type="button">Shuffle</button>
       <button class="reset-btn" id="reset-btn" type="button">Reset all</button>
+      <button class="reset-btn" id="add-btn" type="button">Add card</button>
     </div>
     <div class="decks-container">
       <section class="deck deck-learning" data-deck="learning">
@@ -468,6 +690,25 @@ async function downloadStandalone() {
     </div>
     <button class="install-link" id="install-link" type="button">Add to iPhone</button>
   </div>
+  <dialog id="card-dialog">
+    <form id="card-form" class="card-sheet">
+      <h2 id="card-dialog-title">New flashcard</h2>
+      <p id="card-dialog-help" class="install-lead">Add a photo and a name.</p>
+      <label class="photo-picker">
+        <input id="card-photo-input" type="file" accept="image/*" />
+        <div class="photo-preview" id="card-photo-preview">Tap to add a photo</div>
+      </label>
+      <label class="name-field">
+        <input id="card-name-input" type="text" maxlength="40" placeholder="Name" autocomplete="off" />
+      </label>
+      <div class="dialog-actions">
+        <button class="reset-btn" id="cancel-card-btn" type="button">Cancel</button>
+        <button class="shuffle-btn" id="save-card-btn" type="submit">Save</button>
+      </div>
+      <button class="text-btn" id="restore-name-btn" type="button" hidden>Use directory name</button>
+      <button class="text-btn danger" id="delete-card-btn" type="button" hidden>Delete this card</button>
+    </form>
+  </dialog>
   <dialog id="install-dialog">
     <form method="dialog" class="install-sheet">
       <h2>Put this on your iPhone</h2>
@@ -513,8 +754,22 @@ async function loadPeople() {
 async function start() {
   try {
     people = await loadPeople();
+    const custom = loadCustom();
+    customNames = custom.names;
     people.forEach((person) => {
       person.pronunciation = person.pronunciation || PRONUNCIATIONS[person.id] || "";
+      peopleById.set(person.id, person);
+    });
+    custom.cards.forEach((card) => {
+      if (peopleById.has(card.id)) return;
+      const person = {
+        id: card.id,
+        firstName: card.firstName,
+        fullName: card.fullName || card.firstName,
+        photo: card.photo || null,
+        custom: true,
+      };
+      people.push(person);
       peopleById.set(person.id, person);
     });
     const decks = loadDecks(people);

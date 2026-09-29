@@ -27,6 +27,7 @@
       <div class="controls">
         <button class="shuffle-btn" id="shuffle-btn" type="button">Shuffle</button>
         <button class="reset-btn" id="reset-btn" type="button">Reset all</button>
+        <button class="reset-btn" id="add-btn" type="button">Add card</button>
       </div>
 
       <div class="decks-container">
@@ -51,6 +52,38 @@
         Add to iPhone
       </button>
     </div>
+
+    <dialog id="card-dialog">
+      <form id="card-form" class="card-sheet">
+        <h2 id="card-dialog-title">New flashcard</h2>
+        <p id="card-dialog-help" class="install-lead">Add a photo and a name.</p>
+        <label class="photo-picker">
+          <span class="sr-only">Photo</span>
+          <input id="card-photo-input" type="file" accept="image/*" />
+          <div class="photo-preview" id="card-photo-preview">Tap to add a photo</div>
+        </label>
+        <label class="name-field">
+          <span class="sr-only">Name</span>
+          <input
+            id="card-name-input"
+            type="text"
+            maxlength="40"
+            placeholder="Name"
+            autocomplete="off"
+          />
+        </label>
+        <div class="dialog-actions">
+          <button class="reset-btn" id="cancel-card-btn" type="button">Cancel</button>
+          <button class="shuffle-btn" id="save-card-btn" type="submit">Save</button>
+        </div>
+        <button class="text-btn" id="restore-name-btn" type="button" hidden>
+          Use directory name
+        </button>
+        <button class="text-btn danger" id="delete-card-btn" type="button" hidden>
+          Delete this card
+        </button>
+      </form>
+    </dialog>
 
     <dialog id="install-dialog">
       <form method="dialog" class="install-sheet">

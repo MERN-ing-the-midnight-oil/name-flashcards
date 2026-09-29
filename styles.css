@@ -209,8 +209,23 @@ button {
 
 .card.is-revealed .card-name,
 .card.is-revealed .card-say,
-.card.is-revealed .card-photo .initials {
+.card.is-revealed .card-photo .initials,
+.card.is-revealed .edit-name-btn {
   visibility: visible;
+}
+
+.edit-name-btn {
+  display: block;
+  width: 100%;
+  margin-top: 0.2rem;
+  padding: 4px 0 0;
+  border: 0;
+  background: none;
+  color: #888780;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  visibility: hidden;
 }
 
 .empty-state {
@@ -349,6 +364,85 @@ dialog::backdrop {
   font-size: 12px;
   color: #3b6d11;
   text-align: center;
+}
+
+.card-sheet h2 {
+  font-size: 1.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.photo-picker {
+  display: block;
+  margin: 0.85rem 0 0.75rem;
+  cursor: pointer;
+}
+
+.photo-picker[hidden],
+.text-btn[hidden] {
+  display: none !important;
+}
+
+.photo-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.photo-preview {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  max-height: 220px;
+  border: 0.5px dashed #d3d1c7;
+  border-radius: 10px;
+  background: #f5f3ed;
+  color: #888780;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.photo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.name-field input {
+  width: 100%;
+  border: 0.5px solid #d3d1c7;
+  border-radius: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  margin-bottom: 0.85rem;
+  background: white;
+}
+
+.text-btn {
+  display: block;
+  width: 100%;
+  margin-top: 0.65rem;
+  border: 0;
+  background: none;
+  color: #888780;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.text-btn.danger {
+  color: #e24b4a;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 
 @media (max-width: 800px) {
